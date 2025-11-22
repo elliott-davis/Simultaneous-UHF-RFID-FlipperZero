@@ -513,6 +513,7 @@ void uhf_reader_module_setting_change(VariableItem* Item) {
             //Freeing yrm100x worker
             uhf_worker_stop(App->YRM100XWorker);
             uhf_worker_free(App->YRM100XWorker);
+            App->YRM100XWorker = NULL;
         }
         //Mark the M7E as being used
         App->UartHelper = uart_helper_alloc();
@@ -528,6 +529,7 @@ void uhf_reader_module_setting_change(VariableItem* Item) {
             //Freeing yrm100x worker
             uhf_worker_stop(App->YRM100XWorker);
             uhf_worker_free(App->YRM100XWorker);
+            App->YRM100XWorker = NULL;
         }
 
         //Mark the M6E as being used

@@ -93,7 +93,33 @@ Also, you need the Flipper Zero which is available from [Flipper Devices](https:
 
 ![Raspberry Pi Zero Pinout](images/rpi-zero-pinout.png)
 
-### Hardware Setup:
+### Option 1: M7E via USB (Recommended)
+This method uses the USB-C interface on the M7E Hecto and avoids the need for the `soft_uart` kernel module.
+
+**Hardware Setup:**
+1. Connect the M7E Hecto reader to the Raspberry Pi Zero USB data port using a USB-C cable.
+2. Connect the Flipper Zero to the Raspberry Pi GPIO Pins (Hardware UART):
+  - TX (pin 13) on Flipper Zero -> GPIO pin 15 (RX) on Raspberry Pi Zero
+  - RX (pin 14) on Flipper Zero -> GPIO pin 14 (TX) on Raspberry Pi Zero
+  - Ground on Flipper Zero -> Ground on Raspberry Pi Zero
+
+**Software Setup:**
+1. Ensure Raspberry Pi OS is installed.
+2. Enable the hardware serial port and disable the serial console:
+   - Run `sudo raspi-config`
+   - Select `Interface Options` -> `Serial Port`
+   - Answer **No** to "Would you like a login shell to be accessible over serial?"
+   - Answer **Yes** to "Would you like the serial port hardware to be enabled?"
+   - Reboot the Pi.
+3. Install the [Python wrapper](https://github.com/gotthardp/python-mercuryapi/blob/master/README.md) for the ThingMagic Mercury API on the Raspberry Pi Zero. 
+4. Download `pi-zero-uhf.py` to your Raspberry Pi Zero.
+5. Add the following line to `/etc/rc.local` to start the script on boot:
+   - `sudo python /Path/To/pi-zero-uhf.py --usb &`
+
+### Option 2: M6E/M7E via GPIO (Legacy)
+Use this method if you cannot use USB or are using an M6E Nano without USB support. This requires `soft_uart`.
+
+**Hardware Setup:**
 1. Connect the M6e/M7e Nano reader to the Raspberry Pi GPIO pins:
   - TX on the M6e/M7e should connect to GPIO pin 15 on the Raspberry Pi Zero
   - RX on the M6e/M7e should connect to GPIO pin 14 on the Raspberry Pi Zero

@@ -98,6 +98,11 @@ void uhf_reader_view_write_enter_callback(void* context) {
 
     //Setting default reading states and freeing FuriStrings used
     App->IsWriting = false;
+    with_view_model(
+        App->ViewWrite,
+        UHFReaderWriteModel * Model,
+        { Model->IsWriting = false; },
+        true);
 
     furi_string_free(TempTag);
     furi_string_free(TempStr);
@@ -110,6 +115,10 @@ void uhf_reader_view_write_enter_callback(void* context) {
 */
 void uhf_reader_view_write_exit_callback(void* context) {
     UHFReaderApp* App = (UHFReaderApp*)context;
+    if(App->IsWriting && App->UHFModuleType != YRM100X_MODULE) {
+        uart_helper_send(App->UartHelper, "STOP\n", 5);
+        App->IsWriting = false;
+    }
     furi_timer_stop(App->Timer);
     furi_timer_free(App->Timer);
     App->Timer = NULL;
@@ -283,8 +292,21 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
 
         //If the user presses the ok button while the app is writing (to cancel the operation if the tag is inactive) then the worker is stopped
         if(App->IsWriting){
-            uhf_worker_stop(App->YRM100XWorker);
+            if(App->UHFModuleType != YRM100X_MODULE) {
+                uart_helper_send(App->UartHelper, "STOP\n", 5);
+            } else {
+                uhf_worker_stop(App->YRM100XWorker);
+            }
             App->IsWriting = false;
+            
+            bool redraw = true;
+            with_view_model(
+                App->ViewWrite,
+                UHFReaderWriteModel * Model,
+                {
+                    Model->IsWriting = false;
+                },
+                redraw);
              
             return true;
         }
@@ -299,19 +321,27 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                     if(furi_string_equal(Model->WriteFunction, WRITE_EPC_VAL)) {
                         uart_helper_send(App->UartHelper, "WRITE\n", 6);
                         uart_helper_send_string(App->UartHelper, Model->EpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                         uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                     } else if(furi_string_equal(Model->WriteFunction, WRITE_RES_MEM)) {
                         uart_helper_send(App->UartHelper, "WRITERES\n", 9);
                         uart_helper_send_string(App->UartHelper, Model->EpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                         uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                     } else if(furi_string_equal(Model->WriteFunction, WRITE_USR_MEM)) {
                         uart_helper_send(App->UartHelper, "WRITEUSR\n", 9);
                         uart_helper_send_string(App->UartHelper, Model->EpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                         uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                     } else if(furi_string_equal(Model->WriteFunction, WRITE_TID_MEM)) {
                         uart_helper_send(App->UartHelper, "WRITETID\n", 9);
                         uart_helper_send_string(App->UartHelper, Model->EpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                         uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
                     }
                 } else {
                     // Resetting the dynamically allocated arrays to zero
@@ -475,7 +505,7 @@ void uhf_reader_view_write_draw_callback(Canvas* canvas, void* model) {
         elements_button_center(canvas, "Write");
 
     } else {
-        elements_button_center(canvas, "Cancel");
+        elements_button_center(canvas, "Stop");
     }
     furi_string_free(xstr);
 }
@@ -508,6 +538,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         furi_string_get_cstr(Model->EpcValue),
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_EPC_VAL);
+                    furi_string_set(Model->NewEpcValue, Model->EpcValue);
                 },
                 redraw);
 
@@ -543,6 +574,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         furi_string_get_cstr(Model->ResValue),
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_RES_MEM);
+                    furi_string_set(Model->NewEpcValue, Model->ResValue);
                 },
                 redraw);
 
@@ -576,6 +608,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         furi_string_get_cstr(Model->MemValue),
                         App->TempBufferSaveSize);
                     furi_string_set(Model->WriteFunction, WRITE_USR_MEM);
+                    furi_string_set(Model->NewEpcValue, Model->MemValue);
                 },
                 redraw);
 
@@ -609,6 +642,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         furi_string_get_cstr(Model->TidValue),
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_TID_MEM);
+                    furi_string_set(Model->NewEpcValue, Model->TidValue);
                 },
                 redraw);
 
@@ -683,6 +717,7 @@ void view_write_alloc(UHFReaderApp* App) {
     App->CrcBytes = (uint16_t*)malloc(2 * sizeof(uint16_t));
 
     //Setting default values for the view model
+    ModelWrite->IsWriting = false;
     ModelWrite->Setting1Index = App->Setting1Index;
     ModelWrite->Setting2Power = App->Setting2PowerStr;
     ModelWrite->Setting3Index = App->Setting3Index;

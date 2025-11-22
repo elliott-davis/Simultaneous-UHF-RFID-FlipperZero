@@ -1,0 +1,38 @@
+[Unit]
+Description=UHF RFID Reader Bridge Service
+After=network.target
+
+[Service]
+Type=simple
+# Run as non-root user
+User=elliottdavis
+Group=elliottdavis
+WorkingDirectory=/home/elliottdavis/flipper
+ExecStart=/home/elliottdavis/flipper/.venv/bin/python /home/elliottdavis/flipper/pi-zero-uhf.py --usb
+# Add command-line arguments here if needed, for example:
+# ExecStart=/home/elliottdavis/flipper/.venv/bin/python /home/elliottdavis/flipper/pi-zero-uhf.py --reader-port /dev/ttyUSB0 --flipper-port /dev/serial0
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Ensure Python output is not buffered
+Environment="PYTHONUNBUFFERED=1"
+
+# Give the service access to serial ports
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target
+
+# Installation instructions:
+# 1. Copy to systemd directory (requires sudo):
+#    sudo cp pi-zero-uhf.service /etc/systemd/system/
+# 2. Reload systemd and enable service:
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable pi-zero-uhf.service
+#    sudo systemctl start pi-zero-uhf.service
+# 3. Check status:
+#    sudo systemctl status pi-zero-uhf.service
+# 4. View logs:
+#    sudo journalctl -u pi-zero-uhf.service -f

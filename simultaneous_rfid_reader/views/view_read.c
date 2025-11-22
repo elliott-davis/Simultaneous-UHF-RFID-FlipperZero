@@ -43,7 +43,13 @@ void uhf_reader_view_read_draw_callback(Canvas* canvas, void* model) {
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
     canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str(canvas, 4, 11, "           Read Menu:");
+    canvas_draw_str(canvas, 4, 11, "Read");
+    
+    if(!MyModel->IsReading) {
+        canvas_set_font(canvas, FontSecondary);
+        canvas_draw_str(canvas, 85, 11, "Up:Save");
+    }
+    
     canvas_set_font(canvas, FontSecondary);
 
     //Displaying the current number of UHF Tags read
@@ -611,7 +617,9 @@ bool uhf_reader_view_read_custom_event_callback(uint32_t event, void* context) {
             //Stop reading
             App->IsReading = false;
             notification_message(App->Notifications, &uhf_sequence_blink_stop);
-            uhf_worker_stop(App->YRM100XWorker);
+            if(App->UHFModuleType == YRM100X_MODULE) {
+                uhf_worker_stop(App->YRM100XWorker);
+            }
             with_view_model(
                 App->ViewRead,
                 UHFReaderConfigModel * model,
