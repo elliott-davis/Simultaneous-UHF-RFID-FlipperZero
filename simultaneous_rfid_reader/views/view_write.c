@@ -68,8 +68,30 @@ void uhf_reader_view_write_enter_callback(void* context) {
         } else {
             //Grab the saved uhf tag info from the saved epcs file
             const char* InputString = furi_string_get_cstr(TempTag);
-            furi_string_set(App->EpcToWrite, extract_epc(InputString));
-            furi_string_set(App->EpcName, extract_name(InputString));
+
+            char* extracted_name = extract_name(InputString);
+            char* extracted_epc = extract_epc(InputString);
+            char* extracted_tid = extract_tid(InputString);
+            char* extracted_res = extract_res(InputString);
+            char* extracted_mem = extract_mem(InputString);
+            char* extracted_pc = extract_pc(InputString);
+            char* extracted_crc = extract_crc(InputString);
+
+            const char* safe_name = extracted_name ? extracted_name : "";
+            const char* safe_epc = extracted_epc ? extracted_epc : "";
+            const char* safe_tid = extracted_tid ? extracted_tid : "";
+            const char* safe_res = extracted_res ? extracted_res : "";
+            const char* safe_mem = extracted_mem ? extracted_mem : "";
+            const char* safe_pc = extracted_pc ? extracted_pc : "";
+            const char* safe_crc = extracted_crc ? extracted_crc : "";
+
+            furi_string_set_str(App->EpcToWrite, safe_epc);
+            furi_string_set_str(App->EpcName, safe_name);
+
+            // Keep TempSaveBuffer aligned with the EPC we plan to write
+            if(App->TempSaveBuffer && App->TempBufferSaveSize > 0) {
+                snprintf(App->TempSaveBuffer, App->TempBufferSaveSize, "%s", safe_epc);
+            }
             
             //Set the write model uhf tag values accordingly
             bool redraw = true;
@@ -77,16 +99,33 @@ void uhf_reader_view_write_enter_callback(void* context) {
                 App->ViewWrite,
                 UHFReaderWriteModel * Model,
                 {
-                    furi_string_set(Model->EpcValue, extract_epc(InputString));
-                    furi_string_set(Model->TidValue, extract_tid(InputString));
-                    furi_string_set(Model->ResValue, extract_res(InputString));
-                    furi_string_set(Model->MemValue, extract_mem(InputString));
-                    furi_string_set(Model->Pc, extract_pc(InputString));
-                    furi_string_set(Model->Crc, extract_crc(InputString));
+                    furi_string_set_str(Model->EpcValue, safe_epc);
+                    furi_string_set_str(Model->TidValue, safe_tid);
+                    furi_string_set_str(Model->ResValue, safe_res);
+                    furi_string_set_str(Model->MemValue, safe_mem);
+                    furi_string_set_str(Model->Pc, safe_pc);
+                    furi_string_set_str(Model->Crc, safe_crc);
+
+                    // Default to Write All mode so pressing OK writes all saved tag data
+                    furi_string_set_str(Model->WriteFunction, WRITE_ALL);
+                    furi_string_set_str(Model->NewEpcValue, safe_epc);
+                    furi_string_set_str(Model->NewTidValue, safe_tid);
+                    furi_string_set_str(Model->NewResValue, safe_res);
+                    furi_string_set_str(Model->NewMemValue, safe_mem);
+                    furi_string_set_str(Model->WriteStatus, "Press OK to write all");
                 },
                 redraw);
+
             //Close the file
             flipper_format_file_close(App->EpcFile);
+
+            free(extracted_name);
+            free(extracted_epc);
+            free(extracted_tid);
+            free(extracted_res);
+            free(extracted_mem);
+            free(extracted_pc);
+            free(extracted_crc);
         }
     }
 
@@ -160,7 +199,14 @@ void uhf_write_tag_worker_callback(UHFWorkerEvent event, void* context) {
                 App->ViewWrite,
                 UHFReaderWriteModel * Model,
                 {
-                    if(furi_string_equal(Model->WriteFunction,WRITE_EPC_VAL)){
+                    if(furi_string_equal(Model->WriteFunction, WRITE_ALL)){
+                        furi_string_set(TempTid, Model->NewTidValue);
+                        furi_string_set(TempRes, Model->NewResValue);
+                        furi_string_set(TempMem, Model->NewMemValue);
+                        furi_string_set(TempEpc, Model->NewEpcValue);
+                        
+                    }
+                    else if(furi_string_equal(Model->WriteFunction,WRITE_EPC_VAL)){
                         furi_string_set(TempTid, Model->TidValue);
                         furi_string_set(TempRes, Model->ResValue);
                         furi_string_set(TempMem, Model->MemValue);
@@ -318,7 +364,40 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                 Model->IsWriting = true;
                 //TODO: Modify this to work for the M6E and M7E
                 if(App->UHFModuleType != YRM100X_MODULE) {
-                    if(furi_string_equal(Model->WriteFunction, WRITE_EPC_VAL)) {
+                    if(furi_string_equal(Model->WriteFunction, WRITE_ALL)) {
+                        // Write All: Send EPC write command (primary data)
+                        // Note: TID is typically read-only on most tags, Reserved requires access password
+                        // We write EPC first, then User Memory, then Reserved, then TID
+                        
+                        // Write EPC
+                        uart_helper_send(App->UartHelper, "WRITE\n", 6);
+                        uart_helper_send_string(App->UartHelper, Model->EpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        
+                        // Write User Memory
+                        uart_helper_send(App->UartHelper, "WRITEUSR\n", 9);
+                        uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        uart_helper_send_string(App->UartHelper, Model->NewMemValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        
+                        // Write Reserved Memory
+                        uart_helper_send(App->UartHelper, "WRITERES\n", 9);
+                        uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        uart_helper_send_string(App->UartHelper, Model->NewResValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        
+                        // Write TID (Note: TID is often read-only on most tags)
+                        uart_helper_send(App->UartHelper, "WRITETID\n", 9);
+                        uart_helper_send_string(App->UartHelper, Model->NewEpcValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        uart_helper_send_string(App->UartHelper, Model->NewTidValue);
+                        uart_helper_send(App->UartHelper, "\n", 1);
+                        
+                    } else if(furi_string_equal(Model->WriteFunction, WRITE_EPC_VAL)) {
                         uart_helper_send(App->UartHelper, "WRITE\n", 6);
                         uart_helper_send_string(App->UartHelper, Model->EpcValue);
                         uart_helper_send(App->UartHelper, "\n", 1);
@@ -377,7 +456,37 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                         combinedCrc |= App->CrcBytes[i];
                     }
 
-                    if(furi_string_equal(Model->WriteFunction, WRITE_EPC_VAL) &&
+                    // Handle Write All mode - enable all write masks and set all data
+                    if(furi_string_equal(Model->WriteFunction, WRITE_ALL)) {
+                        // Set EPC data
+                        hex_string_to_bytes(
+                            furi_string_get_cstr(Model->NewEpcValue), App->EpcBytes, &App->EpcBytesLen);
+                        uhf_tag_set_epc(
+                            App->YRM100XWorker->NewTag, (uint8_t*)App->EpcBytes, App->EpcBytesLen * sizeof(uint8_t));
+                        m100_enable_write_mask(App->YRM100XWorker->module, WRITE_EPC);
+
+                        // Set User memory data
+                        hex_string_to_bytes(
+                            furi_string_get_cstr(Model->NewMemValue), App->UserBytes, &App->UserBytesLen);
+                        uhf_tag_set_user(
+                            App->YRM100XWorker->NewTag, (uint8_t*)App->UserBytes, App->UserBytesLen * sizeof(uint8_t));
+                        m100_enable_write_mask(App->YRM100XWorker->module, WRITE_USER);
+
+                        // Set TID data
+                        hex_string_to_bytes(
+                            furi_string_get_cstr(Model->NewTidValue), App->TidBytes, &App->TidBytesLen);
+                        uhf_tag_set_tid(
+                            App->YRM100XWorker->NewTag, (uint8_t*)App->TidBytes, App->TidBytesLen * sizeof(uint8_t));
+                        m100_enable_write_mask(App->YRM100XWorker->module, WRITE_TID);
+
+                        // Set Reserved memory data
+                        hex_string_to_bytes(
+                            furi_string_get_cstr(Model->NewResValue), App->ResBytes, &App->ResBytesLen);
+                        uhf_tag_set_kill_pwd(App->YRM100XWorker->NewTag, App->ResBytes, App->ResBytesLen);
+                        uhf_tag_set_access_pwd(App->YRM100XWorker->NewTag, App->ResBytes, App->ResBytesLen);
+                        m100_enable_write_mask(App->YRM100XWorker->module, WRITE_RFU);
+
+                    } else if(furi_string_equal(Model->WriteFunction, WRITE_EPC_VAL) &&
                        Model->NewEpcValue != NULL) {
                         hex_string_to_bytes(
                             App->TempSaveBuffer, App->EpcBytes, &App->EpcBytesLen);
@@ -401,7 +510,7 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                             App->YRM100XWorker->NewTag, (uint8_t*)App->UserBytes, App->UserBytesLen * sizeof(uint8_t));
                         m100_enable_write_mask(App->YRM100XWorker->module, WRITE_USER);
                         
-                    } else {
+                    } else if(!furi_string_equal(Model->WriteFunction, WRITE_ALL)) {
                         hex_string_to_bytes(
                             furi_string_get_cstr(Model->MemValue), App->UserBytes, &App->UserBytesLen);
                         uhf_tag_set_user(
@@ -414,7 +523,7 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                         uhf_tag_set_tid(
                             App->YRM100XWorker->NewTag, (uint8_t*)App->TidBytes, App->TidBytesLen * sizeof(uint8_t));
                         m100_enable_write_mask(App->YRM100XWorker->module, WRITE_TID);
-                    } else {
+                    } else if(!furi_string_equal(Model->WriteFunction, WRITE_ALL)) {
                         hex_string_to_bytes(
                             furi_string_get_cstr(Model->TidValue), App->TidBytes, &App->TidBytesLen);
                         uhf_tag_set_tid(
@@ -428,7 +537,7 @@ bool uhf_reader_view_write_custom_event_callback(uint32_t event, void* context) 
                         uhf_tag_set_access_pwd(App->YRM100XWorker->NewTag, App->ResBytes, App->ResBytesLen);
                         
                         m100_enable_write_mask(App->YRM100XWorker->module, WRITE_RFU);
-                    } else {
+                    } else if(!furi_string_equal(Model->WriteFunction, WRITE_ALL)) {
                         hex_string_to_bytes(
                             furi_string_get_cstr(Model->ResValue), App->ResBytes, &App->ResBytesLen);
 
@@ -482,23 +591,19 @@ void uhf_reader_view_write_draw_callback(Canvas* canvas, void* model) {
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str(canvas, 4, 11, "           Write Menu:");
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 0, 33, "Write Mode:");
+    canvas_draw_str(canvas, 0, 22, "Mode:");
 
     //Displaying the current write mode selected
-    canvas_draw_str(canvas, 51, 33, furi_string_get_cstr(MyModel->WriteFunction));
+    canvas_draw_str(canvas, 28, 22, furi_string_get_cstr(MyModel->WriteFunction));
 
-    //Display the CRC
-    canvas_draw_str(canvas, 4, 22, "CRC:");
-
-    canvas_draw_str(canvas, 28, 22, furi_string_get_cstr(MyModel->Crc));
-
-    //Display the PC
-    canvas_draw_str(canvas, 70, 22, "PC:");
-    canvas_draw_str(canvas, 90, 22, furi_string_get_cstr(MyModel->Pc));
+    //Display hint for arrow keys when not writing
+    if(!MyModel->IsWriting) {
+        canvas_draw_str(canvas, 0, 33, "Arrows: Select Field");
+    }
 
     //Display the current write status
-    canvas_draw_str(canvas, 0, 44, "Write Status: ");
-    canvas_draw_str(canvas, 65, 44, furi_string_get_cstr(MyModel->WriteStatus));
+    canvas_draw_str(canvas, 0, 44, "Status: ");
+    canvas_draw_str(canvas, 40, 44, furi_string_get_cstr(MyModel->WriteStatus));
 
     //Display the write button
     if(!MyModel->IsWriting) {
@@ -526,7 +631,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
         if(event->key == InputKeyLeft && !App->IsWriting) {
             text_input_set_header_text(App->EpcWrite, "EPC Value");
 
-            bool redraw = false;
+            bool redraw = true;
             with_view_model(
                 App->ViewWrite,
 
@@ -539,6 +644,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_EPC_VAL);
                     furi_string_set(Model->NewEpcValue, Model->EpcValue);
+                    furi_string_set_str(Model->WriteStatus, "EPC only");
                 },
                 redraw);
 
@@ -562,7 +668,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
         //If the right button is pressed, then display the reserved memory bank and display the keyboard
         else if(event->key == InputKeyRight && !App->IsWriting) {
             text_input_set_header_text(App->EpcWrite, "Reserved Memory Bank");
-            bool redraw = false;
+            bool redraw = true;
             with_view_model(
                 App->ViewWrite,
 
@@ -575,6 +681,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_RES_MEM);
                     furi_string_set(Model->NewEpcValue, Model->ResValue);
+                    furi_string_set_str(Model->WriteStatus, "Reserved only");
                 },
                 redraw);
 
@@ -596,7 +703,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
         //If the up button is pressed, then display the user memory bank and keyboard
         else if(event->key == InputKeyUp && !App->IsWriting) {
             text_input_set_header_text(App->EpcWrite, "User Memory Bank");
-            bool redraw = false;
+            bool redraw = true;
             with_view_model(
                 App->ViewWrite,
 
@@ -609,6 +716,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         App->TempBufferSaveSize);
                     furi_string_set(Model->WriteFunction, WRITE_USR_MEM);
                     furi_string_set(Model->NewEpcValue, Model->MemValue);
+                    furi_string_set_str(Model->WriteStatus, "User Mem only");
                 },
                 redraw);
 
@@ -630,7 +738,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
         //If the down button is pressed, then display the TID memory bank and the keyboard
         else if(event->key == InputKeyDown && !App->IsWriting) {
             text_input_set_header_text(App->EpcWrite, "TID Memory Bank");
-            bool redraw = false;
+            bool redraw = true;
             with_view_model(
                 App->ViewWrite,
 
@@ -643,6 +751,7 @@ bool uhf_reader_view_write_input_callback(InputEvent* event, void* context) {
                         App->TempBufferSaveSize);
                     furi_string_set_str(Model->WriteFunction, WRITE_TID_MEM);
                     furi_string_set(Model->NewEpcValue, Model->TidValue);
+                    furi_string_set_str(Model->WriteStatus, "TID only");
                 },
                 redraw);
 
@@ -733,12 +842,12 @@ void view_write_alloc(UHFReaderApp* App) {
     furi_string_set_str(EpcValueWriteDefault, "Press Write");
     ModelWrite->EpcValue = EpcValueWriteDefault;
     FuriString* EpcValueWriteStatus = furi_string_alloc();
-    furi_string_set_str(EpcValueWriteStatus, "Press Write");
+    furi_string_set_str(EpcValueWriteStatus, "Press OK to write all");
     ModelWrite->WriteStatus = EpcValueWriteStatus;
     FuriString* WriteDefaultEpc = furi_string_alloc();
     ModelWrite->NewEpcValue = WriteDefaultEpc;
     FuriString* DefaultWriteFunction = furi_string_alloc();
-    furi_string_set_str(DefaultWriteFunction, "Press Arrow Keys");
+    furi_string_set_str(DefaultWriteFunction, WRITE_ALL);
     ModelWrite->WriteFunction = DefaultWriteFunction;
     FuriString* DefaultWriteTid = furi_string_alloc();
     furi_string_set_str(DefaultWriteTid, "TID HERE");
